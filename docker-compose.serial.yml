@@ -1,0 +1,8 @@
+version: "3.9"
+services:
+  backend:
+    devices:
+      - "/dev/ttyACM0:/dev/ttyACM0"
+    environment:
+      - SERIAL_PORT=/dev/ttyACM0
+
