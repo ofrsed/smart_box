@@ -1,3 +1,49 @@
+      <header
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '4px 2px 8px',
+          borderBottom: '1px solid rgba(255,255,255,0.08)'
+        }}
+      >
+        <div
+          style={{
+            width: 64,
+            height: 24,
+            borderRadius: 8,
+            backgroundColor: 'rgba(255,255,255,0.12)'
+          }}
+        />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div
+            style={{
+              fontSize: '0.9rem',
+              fontWeight: 500,
+              color: '#f1f3f5',
+              letterSpacing: 0.15
+            }}
+          >
+            Имя Фамилия
+          </div>
+          <button
+            type="button"
+            onClick={() => setLoggedIn(false)}
+            style={{
+              padding: '6px 14px',
+              borderRadius: 18,
+              border: '1px solid rgba(255,255,255,0.2)',
+              background: 'transparent',
+              color: '#f1f3f5',
+              fontSize: '0.85rem',
+              cursor: 'pointer',
+              fontFamily: 'inherit'
+            }}
+          >
+            Выход
+          </button>
+        </div>
+      </header>
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 
 type DoorStatus = 'open' | 'closed' | 'unknown'
@@ -46,12 +92,14 @@ export function App() {
   const [rawMessage, setRawMessage] = useState<string | null>(null)
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [pressedCell, setPressedCell] = useState<string | null>(null)
+  const [loggedIn, setLoggedIn] = useState<boolean>(true)
 
   const normalizeCells = useCallback((incoming: Record<string, any> | undefined): CellMap => {
     const next = createDefaultState()
     if (incoming) {
       for (const [name, value] of Object.entries(incoming)) {
-        if (CELL_NAMES.includes(name as typeof CELL_NAMES[number])) {
+        if ((CELL_NAMES as readonly string[]).includes(name)) {
           const doorState = typeof value === 'object' && value !== null ? (value as any).door : undefined
           const cycleState = typeof value === 'object' && value !== null ? (value as any).cycle : undefined
           const door: DoorStatus =
@@ -82,6 +130,12 @@ export function App() {
   }, [applyState])
 
   useEffect(() => {
+    if (!loggedIn) {
+      setCells(createDefaultState())
+      setRawMessage(null)
+      return
+    }
+
     let isMounted = true
     let socket: WebSocket | null = null
 
@@ -104,6 +158,10 @@ export function App() {
         if (reconnectRef.current) clearTimeout(reconnectRef.current)
         reconnectRef.current = setTimeout(connect, 1000)
       }
+
+      socket.onerror = () => {
+        socket?.close()
+      }
     }
 
     connect()
@@ -113,15 +171,55 @@ export function App() {
       if (reconnectRef.current) clearTimeout(reconnectRef.current)
       socket?.close()
     }
-  }, [])
+  }, [applyState, loggedIn])
 
   useEffect(() => {
+    if (!loggedIn) {
+      if (pollRef.current) clearInterval(pollRef.current)
+      return
+    }
     fetchState()
     pollRef.current = setInterval(fetchState, 1000)
     return () => {
       if (pollRef.current) clearInterval(pollRef.current)
     }
-  }, [fetchState])
+  }, [fetchState, loggedIn])
+
+  if (!loggedIn) {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          width: '100vw',
+          height: '100vh',
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: '#0b0b0b',
+          color: '#f1f3f5',
+          gap: 24
+        }}
+      >
+        <div style={{ fontSize: '1.2rem', opacity: 0.8 }}>Пустая страница</div>
+        <button
+          type="button"
+          onClick={() => setLoggedIn(true)}
+          style={{
+            padding: '12px 24px',
+            borderRadius: 12,
+            border: '1px solid rgba(255,255,255,0.3)',
+            background: 'rgba(255,255,255,0.08)',
+            color: '#f1f3f5',
+            fontSize: '1rem',
+            cursor: 'pointer',
+            fontFamily: 'inherit'
+          }}
+        >
+          Войти
+        </button>
+      </div>
+    )
+  }
 
   return (
     <div
@@ -130,21 +228,72 @@ export function App() {
         flexDirection: 'column',
         width: '100vw',
         height: '100vh',
-        margin: 0,
+        maxWidth: 600,
+        maxHeight: 1024,
+        margin: '0 auto',
         backgroundColor: '#0b0b0b',
-        padding: '12px 12px 20px'
+        padding: '8px 12px 12px',
+        gap: 8,
+        boxSizing: 'border-box'
       }}
     >
+      <header
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '4px 2px 6px',
+          borderBottom: '1px solid rgba(255,255,255,0.08)'
+        }}
+      >
+        <div
+          style={{
+            width: 64,
+            height: 24,
+            borderRadius: 8,
+            backgroundColor: 'rgba(255,255,255,0.12)'
+          }}
+        />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div
+            style={{
+              fontSize: '0.9rem',
+              fontWeight: 500,
+              color: '#f1f3f5',
+              letterSpacing: 0.15
+            }}
+          >
+            Имя Фамилия
+          </div>
+          <button
+            type="button"
+            onClick={() => setLoggedIn(false)}
+            style={{
+              padding: '6px 14px',
+              borderRadius: 18,
+              border: '1px solid rgba(255,255,255,0.2)',
+              background: 'transparent',
+              color: '#f1f3f5',
+              fontSize: '0.85rem',
+              cursor: 'pointer',
+              fontFamily: 'inherit'
+            }}
+          >
+            Выход
+          </button>
+        </div>
+      </header>
       <div
         style={{
           flex: 1,
+          minHeight: 0,
           display: 'grid',
           gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
           gridAutoRows: '1fr',
-          gap: 12
+          gap: 8
         }}
       >
-        {CELL_NAMES.map((name) => {
+        {CELL_NAMES.map((name, index) => {
           const { door, cycle } = cells[name]
           const isOpen = door === 'open'
           const isClosed = door === 'closed'
@@ -152,66 +301,91 @@ export function App() {
           const isReturned = cycle === 'returned'
 
           let background = '#343a40'
-          let label = 'Нет данных'
           let labelColor = '#ffffff'
 
           if (isOpen) {
             background = '#f8f9fa'
-            label = 'Открыта'
             labelColor = '#0b0b0b'
           } else if (isClosed && isTaken) {
             background = '#e03131'
-            label = 'Инструмент взяли'
           } else if (isClosed && isReturned) {
             background = '#2b8a3e'
-            label = 'Инструмент на месте'
           } else if (isClosed) {
             background = '#212529'
-            label = 'Закрыта'
           }
 
           return (
-            <div
+            <button
               key={name}
+              type="button"
+              onPointerDown={() => setPressedCell(name)}
+              onPointerUp={() => setPressedCell(null)}
+              onPointerLeave={() => setPressedCell((prev) => (prev === name ? null : prev))}
+              onPointerCancel={() => setPressedCell((prev) => (prev === name ? null : prev))}
               style={{
+                position: 'relative',
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
                 justifyContent: 'center',
                 borderRadius: 18,
                 background,
-                boxShadow: '0 12px 30px rgba(0,0,0,0.35)'
+                color: labelColor,
+                border: 'none',
+                padding: 12,
+                fontFamily: 'inherit',
+                cursor: 'pointer',
+                outline: 'none',
+                WebkitTapHighlightColor: 'transparent',
+                touchAction: 'manipulation',
+                userSelect: 'none',
+                transform: pressedCell === name ? 'scale(0.95)' : 'scale(1)',
+                transition: 'transform 0.1s ease'
               }}
             >
-              <div
+              <span
                 style={{
-                  fontSize: 'clamp(1.3rem, 3vw, 2.4rem)',
-                  fontWeight: 700,
-                  color: labelColor
+                  position: 'relative',
+                  width: '84%',
+                  aspectRatio: '1 / 1',
+                  borderRadius: 20,
+                  marginBottom: 14,
+                  border: `2px solid ${labelColor === '#0b0b0b' ? '#adb5bd' : 'rgba(255,255,255,0.35)'}`,
+                  backgroundColor: labelColor === '#0b0b0b' ? '#f8f9fa' : 'rgba(255,255,255,0.08)',
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  justifyContent: 'flex-end',
+                  padding: '10%'
                 }}
               >
-                {name.replace('_', ' ')}
-              </div>
-              <div
+                <span
+                  style={{
+                    fontSize: 'clamp(1.2rem, 3vw, 2rem)',
+                    fontWeight: 700,
+                    color: labelColor === '#0b0b0b' ? '#495057' : '#ffffff',
+                    opacity: 0.85
+                  }}
+                >
+                  {index + 1}
+                </span>
+              </span>
+              <span
                 style={{
-                  marginTop: 8,
-                  fontSize: 'clamp(1rem, 2.4vw, 1.9rem)',
-                  fontWeight: 500,
-                  color: labelColor,
-                  textAlign: 'center',
-                  padding: '0 10px'
+                  fontSize: 'clamp(1rem, 2.6vw, 1.6rem)',
+                  fontWeight: 600,
+                  textAlign: 'center'
                 }}
               >
-                {label}
-              </div>
-            </div>
+                Инструмент
+              </span>
+            </button>
           )
         })}
       </div>
       {rawMessage ? (
         <div
           style={{
-            marginTop: 12,
+            marginTop: 8,
             color: '#868e96',
             fontSize: '0.9rem',
             textAlign: 'center'

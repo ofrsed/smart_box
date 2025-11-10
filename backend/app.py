@@ -183,7 +183,8 @@ def _line_to_updates(line: str) -> Dict[str, str]:
         cell = upd.get("cell")
         state = upd.get("state")
         if cell and state:
-            result[f"Дверь_{cell}"] = "open" if state == "open" else "closed"
+            door_name = cell if cell.startswith("Дверь_") else f"Дверь_{cell}"
+            result[door_name] = "open" if state == "open" else "closed"
     return result
 
 
