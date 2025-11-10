@@ -2,8 +2,15 @@ import React, { useEffect, useRef, useState } from 'react'
 
 type DoorState = 'open' | 'closed' | 'unknown'
 
-const WS_URL = 'ws://localhost:8000/ws'
-const API_URL = 'http://localhost:8000'
+const HOST =
+  typeof window !== 'undefined' && window.location.hostname
+    ? window.location.hostname
+    : 'localhost'
+const PROTO =
+  typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'https' : 'http'
+const WS_PROTO = PROTO === 'https' ? 'wss' : 'ws'
+const WS_URL = `${WS_PROTO}://${HOST}:8000/ws`
+const API_URL = `${PROTO}://${HOST}:8000`
 
 export function App() {
   const [doorState, setDoorState] = useState<DoorState>('unknown')
