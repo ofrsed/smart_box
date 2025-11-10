@@ -1,3 +1,4 @@
+import json
 import threading
 import time
 from typing import Dict, List, Optional
@@ -56,22 +57,48 @@ class ConnectionManager:
 
 
 manager = ConnectionManager()
+CELL_NAMES = [
+    "Дверь_1",
+    "Дверь_2",
+    "Дверь_3",
+    "Дверь_4",
+    "Дверь_5",
+    "Дверь_6",
+    "Дверь_7",
+    "Дверь_8",
+    "Дверь_9",
+    "Дверь_10",
+    "Дверь_11",
+    "Дверь_12",
+]
 _state_lock = threading.Lock()
-_door_state = "unknown"
+_cells: Dict[str, str] = {name: "unknown" for name in CELL_NAMES}
 
 
-def _set_state(new_state: str) -> bool:
-    global _door_state
+def _set_cell_state(cell: str, new_state: str) -> bool:
+    if cell not in CELL_NAMES:
+        return False
     with _state_lock:
-        if _door_state != new_state:
-            _door_state = new_state
+        prev = _cells.get(cell)
+        if prev != new_state:
+            _cells[cell] = new_state
             return True
     return False
 
 
-def _get_state() -> str:
+def _set_bulk_states(updates: Dict[str, str]) -> bool:
+    changed = False
     with _state_lock:
-        return _door_state
+        for cell, new_state in updates.items():
+            if cell in CELL_NAMES and _cells.get(cell) != new_state:
+                _cells[cell] = new_state
+                changed = True
+    return changed
+
+
+def _snapshot() -> Dict[str, str]:
+    with _state_lock:
+        return dict(_cells)
 
 
 def parse_line(line: str) -> List[Dict[str, str]]:
@@ -100,21 +127,30 @@ def parse_line(line: str) -> List[Dict[str, str]]:
     return results
 
 
-def _line_to_state(line: str) -> str:
-    normalized = line.strip().lower()
-    if normalized in {"дверца открыта", "door open", "open"}:
-        return "open"
-    if normalized in {"дверца закрыта", "door closed", "closed"}:
-        return "closed"
+def _line_to_updates(line: str) -> Dict[str, str]:
+    try:
+        parsed = json.loads(line)
+        if isinstance(parsed, dict):
+            result: Dict[str, str] = {}
+            for key, value in parsed.items():
+                state_val = str(value).strip()
+                if state_val == "1":
+                    result[key] = "closed"
+                elif state_val == "0":
+                    result[key] = "open"
+            return result
+    except json.JSONDecodeError:
+        pass
 
+    # Fallback to legacy formats
     updates = parse_line(line)
-    if updates:
-        try:
-            state = updates[-1]["state"]
-            return "open" if state == "open" else "closed"
-        except Exception:
-            pass
-    return ""
+    result: Dict[str, str] = {}
+    for upd in updates:
+        cell = upd.get("cell")
+        state = upd.get("state")
+        if cell and state:
+            result[f"Дверь_{cell}"] = "open" if state == "open" else "closed"
+    return result
 
 
 def serial_reader_loop() -> None:
@@ -154,17 +190,19 @@ def serial_reader_loop() -> None:
                 continue
             last_raw = line
 
-            state = _line_to_state(line)
-            if not state:
+            updates = _line_to_updates(line)
+            if not updates:
                 continue
 
-            changed = _set_state(state)
+            changed = _set_bulk_states(updates)
             if changed:
-                # Fire-and-forget broadcast from thread
-                snapshot = {"door": _get_state(), "raw": line}
+                snapshot = _snapshot()
                 import anyio
 
-                anyio.from_thread.run(manager.broadcast, {"type": "state", "data": snapshot})
+                anyio.from_thread.run(
+                    manager.broadcast,
+                    {"type": "state", "data": {"cells": snapshot, "raw": line}},
+                )
         except Exception:
             time.sleep(0.5)
 
@@ -179,7 +217,7 @@ def health() -> JSONResponse:
 
 @app.get("/state")
 def get_state() -> JSONResponse:
-    return JSONResponse({"door": _get_state()})
+    return JSONResponse({"cells": _snapshot()})
 
 
 @app.post("/mock/{cell_id}/{state}")
@@ -187,12 +225,21 @@ def mock_update(cell_id: int, state: str) -> JSONResponse:
     state = state.lower()
     if state not in ("open", "closed"):
         return JSONResponse({"error": "state must be open or closed"}, status_code=400)
-    changed = _set_state(state)
+    cell_name = CELL_NAMES[cell_id - 1] if 1 <= cell_id <= len(CELL_NAMES) else None
+    if not cell_name:
+        return JSONResponse({"error": "cell_id out of range"}, status_code=400)
+    changed = _set_cell_state(cell_name, state)
     if changed:
         # Broadcast from request context
         import anyio
 
-        anyio.run(manager.broadcast, {"type": "state", "data": {"door": _get_state(), "raw": f"mock:{state}"}})
+        anyio.run(
+            manager.broadcast,
+            {
+                "type": "state",
+                "data": {"cells": _snapshot(), "raw": f"mock:{cell_name}:{state}"},
+            },
+        )
     return JSONResponse({"ok": True, "changed": changed})
 
 
@@ -201,7 +248,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     await manager.connect(websocket)
     try:
         # Send initial state
-        await websocket.send_json({"type": "state", "data": {"door": _get_state()}})
+        await websocket.send_json({"type": "state", "data": {"cells": _snapshot()}})
         while True:
             # Keep connection alive; we do not expect client messages
             await websocket.receive_text()
