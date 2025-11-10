@@ -71,34 +71,68 @@ CELL_NAMES = [
     "Дверь_11",
     "Дверь_12",
 ]
+
+
+class CellState:
+    __slots__ = ("name", "door", "cycle", "awaiting_close")
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.door: str = "unknown"  # "open" | "closed" | "unknown"
+        self.cycle: str = "unknown"  # "taken" | "returned" | "unknown"
+        self.awaiting_close: bool = False
+
+    def apply(self, new_state: str) -> bool:
+        changed = False
+        if new_state == "open":
+            if self.door != "open":
+                changed = True
+            self.door = "open"
+            self.awaiting_close = True
+        elif new_state == "closed":
+            if self.awaiting_close:
+                next_cycle = "taken" if self.cycle in ("returned", "unknown") else "returned"
+                if next_cycle != self.cycle:
+                    changed = True
+                self.cycle = next_cycle
+                self.awaiting_close = False
+            if self.door != "closed":
+                changed = True
+            self.door = "closed"
+        else:
+            # For unknown values
+            if self.door != "unknown":
+                changed = True
+            self.door = "unknown"
+        return changed
+
+    def to_dict(self) -> Dict[str, str]:
+        return {"door": self.door, "cycle": self.cycle}
+
+
 _state_lock = threading.Lock()
-_cells: Dict[str, str] = {name: "unknown" for name in CELL_NAMES}
+_cells: Dict[str, CellState] = {name: CellState(name) for name in CELL_NAMES}
 
 
 def _set_cell_state(cell: str, new_state: str) -> bool:
-    if cell not in CELL_NAMES:
+    if cell not in _cells:
         return False
     with _state_lock:
-        prev = _cells.get(cell)
-        if prev != new_state:
-            _cells[cell] = new_state
-            return True
-    return False
+        return _cells[cell].apply(new_state)
 
 
 def _set_bulk_states(updates: Dict[str, str]) -> bool:
     changed = False
     with _state_lock:
         for cell, new_state in updates.items():
-            if cell in CELL_NAMES and _cells.get(cell) != new_state:
-                _cells[cell] = new_state
+            if cell in _cells and _cells[cell].apply(new_state):
                 changed = True
     return changed
 
 
-def _snapshot() -> Dict[str, str]:
+def _snapshot() -> Dict[str, Dict[str, str]]:
     with _state_lock:
-        return dict(_cells)
+        return {name: state.to_dict() for name, state in _cells.items()}
 
 
 def parse_line(line: str) -> List[Dict[str, str]]:

@@ -1,7 +1,14 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 
-type CellState = 'open' | 'closed' | 'unknown'
-type CellMap = Record<string, CellState>
+type DoorStatus = 'open' | 'closed' | 'unknown'
+type CycleStatus = 'taken' | 'returned' | 'unknown'
+
+type CellStatus = {
+  door: DoorStatus
+  cycle: CycleStatus
+}
+
+type CellMap = Record<string, CellStatus>
 
 const CELL_NAMES = [
   'Дверь_1',
@@ -20,7 +27,7 @@ const CELL_NAMES = [
 
 const createDefaultState = (): CellMap =>
   CELL_NAMES.reduce<CellMap>((acc, name) => {
-    acc[name] = 'unknown'
+    acc[name] = { door: 'unknown', cycle: 'unknown' }
     return acc
   }, {})
 
@@ -45,8 +52,13 @@ export function App() {
     if (incoming) {
       for (const [name, value] of Object.entries(incoming)) {
         if (CELL_NAMES.includes(name as typeof CELL_NAMES[number])) {
-          const normalized = String(value).trim()
-          next[name] = normalized === 'open' ? 'open' : normalized === 'closed' ? 'closed' : 'unknown'
+          const doorState = typeof value === 'object' && value !== null ? (value as any).door : undefined
+          const cycleState = typeof value === 'object' && value !== null ? (value as any).cycle : undefined
+          const door: DoorStatus =
+            doorState === 'open' || doorState === 'closed' ? doorState : 'unknown'
+          const cycle: CycleStatus =
+            cycleState === 'taken' || cycleState === 'returned' ? cycleState : 'unknown'
+          next[name] = { door, cycle }
         }
       }
     }
@@ -112,71 +124,102 @@ export function App() {
   }, [fetchState])
 
   return (
-    <div style={{
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      minHeight: '100vh',
-      margin: 0,
-      backgroundColor: '#1c1c1c'
-    }}>
-      <div style={{
-        width: '100%',
-        maxWidth: 640,
-        padding: '24px 16px'
-      }}>
-        <h1 style={{
-          color: '#fff',
-          textAlign: 'center',
-          marginBottom: 24,
-          fontSize: 'clamp(2rem, 4vw, 3rem)'
-        }}>
-          Состояние дверей
-        </h1>
-        <div style={{
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        width: '100vw',
+        height: '100vh',
+        margin: 0,
+        backgroundColor: '#0b0b0b',
+        padding: '12px 12px 20px'
+      }}
+    >
+      <div
+        style={{
+          flex: 1,
           display: 'grid',
           gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-          gap: 16
-        }}>
-          {CELL_NAMES.map((name) => {
-            const state = cells[name]
-            const isOpen = state === 'open'
-            const isClosed = state === 'closed'
-            const color = isOpen ? '#2f9e44' : isClosed ? '#c92a2a' : '#495057'
-            const label = isOpen ? 'Открыта' : isClosed ? 'Закрыта' : 'Неизвестно'
-            return (
-              <div key={name} style={{
+          gridAutoRows: '1fr',
+          gap: 12
+        }}
+      >
+        {CELL_NAMES.map((name) => {
+          const { door, cycle } = cells[name]
+          const isOpen = door === 'open'
+          const isClosed = door === 'closed'
+          const isTaken = cycle === 'taken'
+          const isReturned = cycle === 'returned'
+
+          let background = '#343a40'
+          let label = 'Нет данных'
+          let labelColor = '#ffffff'
+
+          if (isOpen) {
+            background = '#f8f9fa'
+            label = 'Открыта'
+            labelColor = '#0b0b0b'
+          } else if (isClosed && isTaken) {
+            background = '#e03131'
+            label = 'Инструмент взяли'
+          } else if (isClosed && isReturned) {
+            background = '#2b8a3e'
+            label = 'Инструмент на месте'
+          } else if (isClosed) {
+            background = '#212529'
+            label = 'Закрыта'
+          }
+
+          return (
+            <div
+              key={name}
+              style={{
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
                 justifyContent: 'center',
-                minHeight: 120,
-                borderRadius: 16,
-                background: color,
-                color: '#fff',
-                boxShadow: '0 8px 20px rgba(0,0,0,0.25)'
-              }}>
-                <div style={{ fontSize: 'clamp(1rem, 2.5vw, 1.75rem)', fontWeight: 700 }}>
-                  {name.replace('_', ' ')}
-                </div>
-                <div style={{ marginTop: 8, fontSize: 'clamp(0.9rem, 2.3vw, 1.5rem)' }}>
-                  {label}
-                </div>
+                borderRadius: 18,
+                background,
+                boxShadow: '0 12px 30px rgba(0,0,0,0.35)'
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 'clamp(1.3rem, 3vw, 2.4rem)',
+                  fontWeight: 700,
+                  color: labelColor
+                }}
+              >
+                {name.replace('_', ' ')}
               </div>
-            )
-          })}
-        </div>
-        {rawMessage ? (
-          <div style={{
-            marginTop: 24,
-            color: '#adb5bd',
+              <div
+                style={{
+                  marginTop: 8,
+                  fontSize: 'clamp(1rem, 2.4vw, 1.9rem)',
+                  fontWeight: 500,
+                  color: labelColor,
+                  textAlign: 'center',
+                  padding: '0 10px'
+                }}
+              >
+                {label}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      {rawMessage ? (
+        <div
+          style={{
+            marginTop: 12,
+            color: '#868e96',
             fontSize: '0.9rem',
             textAlign: 'center'
-          }}>
-            Последнее сообщение: {rawMessage}
-          </div>
-        ) : null}
-      </div>
+          }}
+        >
+          Последнее сообщение: {rawMessage}
+        </div>
+      ) : null}
     </div>
   )
 }
