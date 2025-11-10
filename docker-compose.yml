@@ -5,10 +5,8 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     container_name: locker-backend
-    environment:
-      - SERIAL_PORT=/dev/ttyACM0
-      - SERIAL_BAUDRATE=9600
-      - NUM_CELLS=12
+    devices:
+      - "/dev/ttyACM0:/dev/ttyACM0"
     ports:
       - "8000:8000"
     restart: unless-stopped

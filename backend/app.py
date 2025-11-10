@@ -1,16 +1,15 @@
-import os
 import threading
 import time
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 
-SERIAL_PORT = os.getenv("SERIAL_PORT", "/dev/ttyACM0")
-SERIAL_BAUDRATE = int(os.getenv("SERIAL_BAUDRATE", "9600"))
-NUM_CELLS = int(os.getenv("NUM_CELLS", "12"))
+SERIAL_PORT = "/dev/ttyACM0"
+SERIAL_BAUDRATE = 9600
+READ_INTERVAL = 0.1
 
 
 app = FastAPI()
@@ -57,37 +56,22 @@ class ConnectionManager:
 
 
 manager = ConnectionManager()
+_state_lock = threading.Lock()
+_door_state = "unknown"
 
 
-class CellState:
-    def __init__(self, num_cells: int) -> None:
-        # State values: "open" | "closed"
-        self.states: Dict[int, str] = {i: "unknown" for i in range(1, num_cells + 1)}
-        self._lock = threading.Lock()
-
-    def set_state(self, cell_id: int, state: str) -> bool:
-        with self._lock:
-            prev = self.states.get(cell_id)
-            if prev != state:
-                self.states[cell_id] = state
-                return True
-            return False
-
-    def set_all(self, state: str) -> bool:
-        changed = False
-        with self._lock:
-            for k, v in list(self.states.items()):
-                if v != state:
-                    self.states[k] = state
-                    changed = True
-        return changed
-
-    def snapshot(self) -> Dict[int, str]:
-        with self._lock:
-            return dict(self.states)
+def _set_state(new_state: str) -> bool:
+    global _door_state
+    with _state_lock:
+        if _door_state != new_state:
+            _door_state = new_state
+            return True
+    return False
 
 
-cells = CellState(NUM_CELLS)
+def _get_state() -> str:
+    with _state_lock:
+        return _door_state
 
 
 def parse_line(line: str) -> List[Dict[str, str]]:
@@ -116,6 +100,23 @@ def parse_line(line: str) -> List[Dict[str, str]]:
     return results
 
 
+def _line_to_state(line: str) -> str:
+    normalized = line.strip().lower()
+    if normalized in {"дверца открыта", "door open", "open"}:
+        return "open"
+    if normalized in {"дверца закрыта", "door closed", "closed"}:
+        return "closed"
+
+    updates = parse_line(line)
+    if updates:
+        try:
+            state = updates[-1]["state"]
+            return "open" if state == "open" else "closed"
+        except Exception:
+            pass
+    return ""
+
+
 def serial_reader_loop() -> None:
     try:
         import serial  # pyserial
@@ -124,6 +125,7 @@ def serial_reader_loop() -> None:
         serial = None  # type: ignore
 
     ser = None
+    last_raw: Optional[str] = None
     if serial is not None:
         try:
             ser = serial.Serial(SERIAL_PORT, SERIAL_BAUDRATE, timeout=1)
@@ -140,27 +142,28 @@ def serial_reader_loop() -> None:
 
             raw = ser.readline()
             if not raw:
+                time.sleep(READ_INTERVAL)
                 continue
             try:
                 line = raw.decode(errors="ignore").strip()
             except Exception:
                 continue
+            if not line:
+                continue
+            if line == last_raw:
+                continue
+            last_raw = line
 
-            updates = parse_line(line)
-            changed = False
-            for upd in updates:
-                try:
-                    cell_id = int(upd["cell"])
-                except Exception:
-                    continue
-                state = "open" if upd["state"] == "open" else "closed"
-                if cells.set_state(cell_id, state):
-                    changed = True
+            state = _line_to_state(line)
+            if not state:
+                continue
 
+            changed = _set_state(state)
             if changed:
                 # Fire-and-forget broadcast from thread
-                snapshot = cells.snapshot()
+                snapshot = {"door": _get_state(), "raw": line}
                 import anyio
+
                 anyio.from_thread.run(manager.broadcast, {"type": "state", "data": snapshot})
         except Exception:
             time.sleep(0.5)
@@ -176,7 +179,7 @@ def health() -> JSONResponse:
 
 @app.get("/state")
 def get_state() -> JSONResponse:
-    return JSONResponse(cells.snapshot())
+    return JSONResponse({"door": _get_state()})
 
 
 @app.post("/mock/{cell_id}/{state}")
@@ -184,11 +187,12 @@ def mock_update(cell_id: int, state: str) -> JSONResponse:
     state = state.lower()
     if state not in ("open", "closed"):
         return JSONResponse({"error": "state must be open or closed"}, status_code=400)
-    changed = cells.set_state(cell_id, state)
+    changed = _set_state(state)
     if changed:
         # Broadcast from request context
         import anyio
-        anyio.run(manager.broadcast, {"type": "state", "data": cells.snapshot()})
+
+        anyio.run(manager.broadcast, {"type": "state", "data": {"door": _get_state(), "raw": f"mock:{state}"}})
     return JSONResponse({"ok": True, "changed": changed})
 
 
@@ -197,7 +201,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     await manager.connect(websocket)
     try:
         # Send initial state
-        await websocket.send_json({"type": "state", "data": cells.snapshot()})
+        await websocket.send_json({"type": "state", "data": {"door": _get_state()}})
         while True:
             # Keep connection alive; we do not expect client messages
             await websocket.receive_text()

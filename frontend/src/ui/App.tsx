@@ -1,85 +1,108 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 
-type StateMap = Record<number, 'open' | 'closed' | 'unknown'>
+type DoorState = 'open' | 'closed' | 'unknown'
 
-const WS_URL = (import.meta as any).env?.VITE_WS_URL || `ws://${location.hostname}:8000/ws`
-const API_URL = (import.meta as any).env?.VITE_API_URL || `http://${location.hostname}:8000`
+const WS_URL = 'ws://localhost:8000/ws'
+const API_URL = 'http://localhost:8000'
 
 export function App() {
-  const [states, setStates] = useState<StateMap>({})
-  const wsRef = useRef<WebSocket | null>(null)
+  const [doorState, setDoorState] = useState<DoorState>('unknown')
+  const [rawMessage, setRawMessage] = useState<string | null>(null)
+  const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
-    const ws = new WebSocket(WS_URL)
-    wsRef.current = ws
-    ws.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data)
-        if (msg?.type === 'state' && msg?.data) {
-          // keys might be strings; normalize to numbers
-          const normalized: StateMap = {}
-          for (const [k, v] of Object.entries(msg.data as Record<string, string>)) {
-            normalized[Number(k)] = (v as any) as any
+    let isMounted = true
+    let socket: WebSocket | null = null
+
+    const connect = () => {
+      socket = new WebSocket(WS_URL)
+
+      socket.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data)
+          if (msg?.type === 'state' && msg?.data) {
+            const nextState = (msg.data.door as DoorState) || 'unknown'
+            if (isMounted) {
+              setDoorState(nextState)
+              setRawMessage(msg.data.raw ?? null)
+            }
           }
-          setStates(normalized)
+        } catch {
+          // ignore parse errors
         }
-      } catch {}
-    }
-    ws.onclose = () => {
-      // retry after delay
-      setTimeout(() => {
-        if (wsRef.current === ws) wsRef.current = null
-        // trigger reconnect by re-running effect
-        setStates((s) => ({ ...s }))
-      }, 1000)
-    }
-    return () => {
-      ws.close()
-    }
-  }, [states /* naive trigger to reconnect */])
-
-  useEffect(() => {
-    // Initial fetch as fallback
-    fetch(`${API_URL}/state`).then(async (r) => {
-      const data = await r.json()
-      const normalized: StateMap = {}
-      for (const [k, v] of Object.entries(data as Record<string, string>)) {
-        normalized[Number(k)] = (v as any) as any
       }
-      setStates(normalized)
-    }).catch(() => {})
+
+      socket.onclose = () => {
+        if (!isMounted) return
+        if (reconnectRef.current) clearTimeout(reconnectRef.current)
+        reconnectRef.current = setTimeout(connect, 1000)
+      }
+    }
+
+    connect()
+
+    return () => {
+      isMounted = false
+      if (reconnectRef.current) clearTimeout(reconnectRef.current)
+      socket?.close()
+    }
   }, [])
 
-  const cellIds = useMemo(() => {
-    const ids = Object.keys(states).map((n) => Number(n)).sort((a, b) => a - b)
-    return ids.length ? ids : Array.from({ length: 12 }, (_, i) => i + 1)
-  }, [states])
+  useEffect(() => {
+    fetch(`${API_URL}/state`)
+      .then((r) => r.json())
+      .then((data) => {
+        const nextState = (data?.door as DoorState) || 'unknown'
+        setDoorState(nextState)
+        setRawMessage(null)
+      })
+      .catch(() => {
+        setDoorState('unknown')
+      })
+  }, [])
+
+  const label =
+    doorState === 'open'
+      ? 'Дверца открыта'
+      : doorState === 'closed'
+        ? 'Дверца закрыта'
+        : 'Состояние неизвестно'
+
+  const background =
+    doorState === 'open' ? '#2f9e44' : doorState === 'closed' ? '#c92a2a' : '#495057'
 
   return (
-    <div style={{ fontFamily: 'system-ui, sans-serif', padding: 16 }}>
-      <h1 style={{ marginBottom: 12 }}>Ячейки</h1>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
-        {cellIds.map((id) => {
-          const st = states[id] || 'unknown'
-          const color = st === 'open' ? '#ff6b6b' : st === 'closed' ? '#51cf66' : '#adb5bd'
-          return (
-            <div key={id} style={{
-              borderRadius: 12,
-              border: '1px solid #ced4da',
-              padding: 16,
-              background: '#fff',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              minHeight: 100
-            }}>
-              <div style={{ fontSize: 14, color: '#495057' }}>Ячейка {id}</div>
-              <div style={{ marginTop: 8, fontWeight: 700, color }}>{st === 'open' ? 'Открыта' : st === 'closed' ? 'Закрыта' : 'Неизвестно'}</div>
-            </div>
-          )
-        })}
-      </div>
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      minHeight: '100vh',
+      margin: 0,
+      backgroundColor: '#1c1c1c'
+    }}>
+      <button
+        style={{
+          width: '100%',
+          height: '100%',
+          maxWidth: '100vw',
+          maxHeight: '100vh',
+          border: 'none',
+          borderRadius: 0,
+          background: background,
+          color: '#fff',
+          fontSize: 'clamp(2rem, 6vw, 6rem)',
+          fontWeight: 700,
+          cursor: 'default',
+          outline: 'none'
+        }}
+      >
+        {label}
+        {rawMessage ? (
+          <div style={{ marginTop: 16, fontSize: 'clamp(1rem, 2.5vw, 2rem)', fontWeight: 400 }}>
+            {rawMessage}
+          </div>
+        ) : null}
+      </button>
     </div>
   )
 }
