@@ -2,10 +2,12 @@ import json
 import threading
 import time
 from typing import Dict, List, Optional
+import os
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
+import cv2
 
 
 SERIAL_PORT = "/dev/ttyACM0"
@@ -292,4 +294,42 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     except Exception:
         manager.disconnect(websocket)
 
+
+
+# Simple MJPEG stream from RTSP for browser viewing on the login page
+def _mjpeg_generator(rtsp_url: str):
+    cap = cv2.VideoCapture(rtsp_url)
+    if not cap.isOpened():
+        # Stop immediately if cannot open
+        return
+    try:
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                time.sleep(0.2)
+                continue
+            ok, buffer = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+            if not ok:
+                continue
+            jpg = buffer.tobytes()
+            yield (
+                b"--frame\r\n"
+                b"Content-Type: image/jpeg\r\n\r\n" + jpg + b"\r\n"
+            )
+    finally:
+        cap.release()
+
+
+@app.get("/video_feed")
+def video_feed(url: Optional[str] = None) -> StreamingResponse:
+    """
+    MJPEG stream that proxies the RTSP camera for browser playback.
+    Optional query param ?url=rtsp://user:pass@host:554/stream1
+    Otherwise uses env CAMERA_RTSP_URL or a local default.
+    """
+    rtsp_url = url or os.getenv("CAMERA_RTSP_URL") or "rtsp://admin:admin123@192.168.1.2:554/stream1"
+    return StreamingResponse(
+        _mjpeg_generator(rtsp_url),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+    )
 

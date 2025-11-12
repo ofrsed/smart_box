@@ -200,7 +200,32 @@ export function App() {
           gap: 24
         }}
       >
-        <div style={{ fontSize: '1.2rem', opacity: 0.8 }}>Пустая страница</div>
+        <div style={{ fontSize: '1.2rem', opacity: 0.8 }}>Видеокамера</div>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: '90vw',
+            maxWidth: 900,
+            height: 'auto',
+            background: '#111',
+            border: '1px solid rgba(255,255,255,0.2)',
+            borderRadius: 12,
+            overflow: 'hidden'
+          }}
+        >
+          <img
+            src={`${API_URL}/video_feed`}
+            alt="IP Camera"
+            style={{
+              display: 'block',
+              width: '100%',
+              height: 'auto',
+              objectFit: 'cover'
+            }}
+          />
+        </div>
         <button
           type="button"
           onClick={() => setLoggedIn(true)}
